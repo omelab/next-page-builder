@@ -919,7 +919,413 @@ function sanitizeProps(props: any) {
 }
 ```
 
+Advanced Blocks Plugin (plugins/advanced-blocks.ts)
+
+```tsx
+import React from 'react';
+import { FaButton, FaColumns, FaVideo } from 'react-icons/fa';
+import { HOOKS } from '@/lib/plugins/hooks';
+import { pluginRegistry } from '@/lib/plugins/registry';
+
+// Button Component
+const ButtonBlock = ({ text, url, style, onChange }: any) => (
+  <a 
+    href={url} 
+    style={{
+      display: 'inline-block',
+      padding: '10px 20px',
+      background: style?.background || '#0070f3',
+      color: style?.color || 'white',
+      borderRadius: style?.radius || '4px',
+      textDecoration: 'none'
+    }}
+  >
+    {text}
+  </a>
+);
+
+const ButtonControls = ({ text, url, style, onChange }: any) => (
+  <div>
+    <label>Button Text</label>
+    <input
+      type="text"
+      value={text}
+      onChange={(e) => onChange({ text: e.target.value })}
+    />
+    
+    <label>Button URL</label>
+    <input
+      type="text"
+      value={url}
+      onChange={(e) => onChange({ url: e.target.value })}
+    />
+    
+    <label>Background Color</label>
+    <input
+      type="color"
+      value={style?.background || '#0070f3'}
+      onChange={(e) => onChange({ 
+        style: { ...style, background: e.target.value } 
+      })}
+    />
+  </div>
+);
+
+// Columns Component
+const ColumnsBlock = ({ columns = 2, children, onChange }: any) => {
+  const columnStyle = {
+    flex: `1 0 ${100 / columns}%`,
+    padding: '10px'
+  };
+  
+  return (
+    <div style={{ display: 'flex' }}>
+      {Array.from({ length: columns }).map((_, i) => (
+        <div key={i} style={columnStyle}>
+          {children?.[i] || <div>Column {i + 1}</div>}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const ColumnsControls = ({ columns, onChange }: any) => (
+  <div>
+    <label>Number of Columns</label>
+    <select
+      value={columns}
+      onChange={(e) => onChange({ columns: parseInt(e.target.value) })}
+    >
+      {[1, 2, 3, 4].map(num => (
+        <option key={num} value={num}>{num}</option>
+      ))}
+    </select>
+  </div>
+);
+
+// Register the plugin
+export default {
+  name: 'advanced-blocks',
+  version: '1.0.0',
+  blocks: [
+    {
+      id: 'button',
+      name: 'Button',
+      icon: <FaButton />,
+      component: ButtonBlock,
+      panelControls: ButtonControls,
+      defaultProps: {
+        text: 'Click Me',
+        url: '#',
+        style: {
+          background: '#0070f3',
+          color: 'white',
+          radius: '4px'
+        }
+      }
+    },
+    {
+      id: 'columns',
+      name: 'Columns',
+      icon: <FaColumns />,
+      component: ColumnsBlock,
+      panelControls: ColumnsControls,
+      defaultProps: {
+        columns: 2,
+        children: []
+      }
+    },
+    {
+      id: 'video',
+      name: 'Video',
+      icon: <FaVideo />,
+      component: VideoBlock,
+      panelControls: VideoControls,
+      defaultProps: {
+        url: '',
+        autoplay: false,
+        controls: true
+      }
+    }
+  ],
+  hooks: {
+    [HOOKS.TOOLBAR_EXTEND]: [() => {
+      return (
+        <div className="toolbar-section">
+          <h4>Advanced</h4>
+        </div>
+      );
+    }]
+  }
+};
+
+// Video Component (implementation omitted for brevity)
+function VideoBlock(props: any) {
+  return <div>Video Block</div>;
+}
+
+function VideoControls(props: any) {
+  return <div>Video Controls</div>;
+}
+```
+
+
+
 
 ## 7. Page Builder Page (app/(builder)/page/[id]/page.tsx)
+
+```tsx
+import { prisma } from '@/lib/prisma';
+import { loadPlugins } from '@/lib/plugins/loader';
+import Canvas from '@/components/builder/Canvas';
+import Toolbar from '@/components/builder/Toolbar';
+import Panel from '@/components/builder/Panel';
+import { useState } from 'react';
+
+export default async function PageBuilder({ params }: { params: { id: string } }) {
+  // Load plugins (this would ideally happen at app startup)
+  await loadPlugins();
+  
+  const pageData = await prisma.page.findUnique({
+    where: { id: parseInt(params.id) },
+    include: {
+      revisions: {
+        orderBy: { createdAt: 'desc' },
+        take: 1
+      }
+    }
+  });
+  
+  if (!pageData) return <div>Page not found</div>;
+  
+  const initialContent = pageData.revisions[0]?.content || { elements: [] };
+
+  return (
+    <BuilderApp initialContent={initialContent} pageId={params.id} />
+  );
+}
+
+function BuilderApp({ initialContent, pageId }: { 
+  initialContent: any; 
+  pageId: string;
+}) {
+  const [content, setContent] = useState(initialContent);
+  const [selectedElement, setSelectedElement] = useState<any>(null);
+
+  const handleUpdate = async (newContent: any) => {
+    setContent(newContent);
+    
+    // Auto-save implementation
+    try {
+      const response = await fetch(`/api/builder/pages?id=${pageId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: pageId,
+          title: content.title || 'Untitled',
+          content: newContent
+        })
+      });
+      
+      if (!response.ok) {
+        console.error('Failed to save page');
+      }
+    } catch (error) {
+      console.error('Error saving page:', error);
+    }
+  };
+
+  return (
+    <div className="builder-container">
+      <div className="builder-header">
+        <h1>Page Builder</h1>
+        <button>Save</button>
+        <button>Preview</button>
+      </div>
+      
+      <div className="builder-layout">
+        <Toolbar />
+        
+        <div className="builder-main">
+          <Canvas 
+            initialData={content} 
+            onUpdate={handleUpdate}
+          />
+        </div>
+        
+        <Panel 
+          selectedElement={selectedElement}
+          onChange={(newProps) => {
+            if (selectedElement) {
+              handleElementChange(selectedElement.id, newProps);
+            }
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+```
+
+
+
 ## 8. CSS Styles
+```css
+/* styles/builder.css */
+.builder-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.builder-header {
+  padding: 1rem;
+  background: #1a1a1a;
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.builder-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.builder-toolbar {
+  width: 250px;
+  background: #f5f5f5;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.builder-main {
+  flex: 1;
+  padding: 1rem;
+  overflow: auto;
+  background: #f9f9f9;
+}
+
+.builder-panel {
+  width: 300px;
+  background: white;
+  padding: 1rem;
+  border-left: 1px solid #ddd;
+  overflow-y: auto;
+}
+
+.elements-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+
+.element-item {
+  padding: 0.5rem;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.element-item:hover {
+  background: #f0f0f0;
+}
+
+.element-icon {
+  font-size: 1.2rem;
+}
+
+.builder-canvas {
+  min-height: 100%;
+  padding: 2rem;
+  outline: none;
+}
+
+.builder-element {
+  margin-bottom: 1rem;
+  border: 1px dashed transparent;
+  padding: 0.5rem;
+}
+
+.builder-element:hover {
+  border-color: #0070f3;
+}
+
+.element-toolbar {
+  position: absolute;
+  top: -30px;
+  right: 0;
+  background: #0070f3;
+  padding: 0.25rem;
+  border-radius: 4px 4px 0 0;
+  display: none;
+}
+
+.builder-element:hover .element-toolbar {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.panel-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.panel-controls label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+}
+
+.panel-controls input,
+.panel-controls select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+```
+
+
+
 ## 9. Environment Variables (.env)
+
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/pagebuilder?schema=public"
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_key
+```
+
+### Implementation Notes
+
+1. Dependencies: Make sure to install all required packages:
+```bash
+npm install @dnd-kit/core @dnd-kit/sortable @dnd-kit/utables @prisma/client react-icons
+```
+2. Database Setup: Run Prisma migrations after setting up your schema:
+```bash
+   npx prisma migrate dev --name init
+```
+3. Authentication: You'll want to add authentication (NextAuth.js is a good choice) to protect your builder routes.
+4. Production Considerations:
+  - Implement proper error boundaries 
+  - Add loading states 
+  - Consider adding undo/redo functionality 
+  - Implement proper sanitization for HTML content
+
+5. Extending:
+  - Add more block types via plugins 
+  - Implement template saving/loading 
+  - Add responsive design controls 
+  - Implement global style settings
+
+
