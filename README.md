@@ -620,10 +620,306 @@ function DraggableElement({ block }: { block: any }) {
 
 Panel Component (components/builder/Panel.tsx)
 
+```tsx
+'use client';
 
+import { pluginRegistry, HOOKS } from '@/lib/plugins/registry';
+import { useState, useEffect } from 'react';
 
+export default function Panel({ selectedElement, onChange }: {
+  selectedElement: any;
+  onChange: (newProps: any) => void;
+}) {
+  const [controls, setControls] = useState<React.ReactNode[]>([]);
+
+  useEffect(() => {
+    if (!selectedElement) return;
+
+    const blockType = pluginRegistry.getBlock(selectedElement.type);
+    const newControls: React.ReactNode[] = [];
+
+    // Add built-in controls
+    if (blockType?.panelControls) {
+      const PanelControls = blockType.panelControls;
+      newControls.push(
+        <PanelControls 
+          key="built-in" 
+          {...selectedElement.props} 
+          onChange={onChange}
+        />
+      );
+    }
+
+    // Add plugin controls
+    const pluginControls = pluginRegistry.runHook(
+      HOOKS.ELEMENT_CONTROLS, 
+      selectedElement.type
+    );
+    
+    pluginControls.forEach((Control, index) => {
+      if (typeof Control === 'function') {
+        newControls.push(
+          <Control 
+            key={`plugin-${index}`}
+            {...selectedElement.props}
+            onChange={onChange}
+          />
+        );
+      }
+    });
+
+    setControls(newControls);
+  }, [selectedElement, onChange]);
+
+  if (!selectedElement) {
+    return (
+      <div className="panel-empty">
+        <p>Select an element to edit its properties</p>
+      </div>
+    );
+  }
+
+  const blockType = pluginRegistry.getBlock(selectedElement.type);
+
+  return (
+    <div className="builder-panel">
+      <h3>{blockType?.name || 'Element'} Settings</h3>
+      <div className="panel-controls">
+        {controls}
+      </div>
+    </div>
+  );
+}
+```
+
+Element Component (components/builder/Element.tsx)
+
+```tsx
+'use client';
+
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
+export default function Element({ 
+  id, 
+  children, 
+  onSelect 
+}: {
+  id: string;
+  children: React.ReactNode;
+  onSelect: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    cursor: 'move',
+    position: 'relative',
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect();
+      }}
+      className="builder-element"
+    >
+      {children}
+      <div className="element-toolbar">
+        <button>Delete</button>
+        <button>Duplicate</button>
+      </div>
+    </div>
+  );
+}
+```
+ 
   
 ## 6. Example Plugins
+
+  Basic Blocks Plugin (plugins/basic-blocks.ts)
+
+```tsx
+import React from 'react';
+import { FaHeading, FaParagraph, FaImage, FaSquare } from 'react-icons/fa';
+import { HOOKS } from '@/lib/plugins/hooks';
+import { pluginRegistry } from '@/lib/plugins/registry';
+
+// Heading Component
+const HeadingBlock = ({ text, level = 2, onChange }: any) => {
+  const Tag = `h${Math.min(Math.max(level, 1), 6)}` as keyof JSX.IntrinsicElements;
+  
+  return (
+    <Tag
+      contentEditable
+      suppressContentEditableWarning
+      style={{ fontSize: `${2.5 - (level * 0.2)}rem` }}
+      onBlur={(e) => onChange({ text: e.target.innerText })}
+    >
+      {text}
+    </Tag>
+  );
+};
+
+const HeadingControls = ({ level, onChange }: any) => (
+  <div>
+    <label>Heading Level</label>
+    <select 
+      value={level} 
+      onChange={(e) => onChange({ level: parseInt(e.target.value) })}
+    >
+      {[1, 2, 3, 4, 5, 6].map(lvl => (
+        <option key={lvl} value={lvl}>H{lvl}</option>
+      ))}
+    </select>
+  </div>
+);
+
+// Paragraph Component
+const ParagraphBlock = ({ text, onChange }: any) => (
+  <p
+    contentEditable
+    suppressContentEditableWarning
+    onBlur={(e) => onChange({ text: e.target.innerText })}
+  >
+    {text}
+  </p>
+);
+
+// Image Component
+const ImageBlock = ({ src, alt, onChange }: any) => (
+  <div>
+    {src ? (
+      <img src={src} alt={alt} style={{ maxWidth: '100%' }} />
+    ) : (
+      <div className="image-placeholder">Select an image</div>
+    )}
+    <button onClick={() => {/* Open media library */}}>
+      Select Image
+    </button>
+  </div>
+);
+
+const ImageControls = ({ alt, onChange }: any) => (
+  <div>
+    <label>Alt Text</label>
+    <input
+      type="text"
+      value={alt}
+      onChange={(e) => onChange({ alt: e.target.value })}
+    />
+  </div>
+);
+
+// Section Component
+const SectionBlock = ({ children, background, padding }: any) => (
+  <div style={{ background, padding }}>
+    {children}
+  </div>
+);
+
+const SectionControls = ({ background, padding, onChange }: any) => (
+  <div>
+    <label>Background</label>
+    <input
+      type="color"
+      value={background}
+      onChange={(e) => onChange({ background: e.target.value })}
+    />
+    
+    <label>Padding</label>
+    <input
+      type="text"
+      value={padding}
+      onChange={(e) => onChange({ padding: e.target.value })}
+    />
+  </div>
+);
+
+// Register the plugin
+export default {
+  name: 'basic-blocks',
+  version: '1.0.0',
+  blocks: [
+    {
+      id: 'heading',
+      name: 'Heading',
+      icon: <FaHeading />,
+      component: HeadingBlock,
+      panelControls: HeadingControls,
+      defaultProps: {
+        text: 'New Heading',
+        level: 2
+      }
+    },
+    {
+      id: 'paragraph',
+      name: 'Paragraph',
+      icon: <FaParagraph />,
+      component: ParagraphBlock,
+      defaultProps: {
+        text: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.'
+      }
+    },
+    {
+      id: 'image',
+      name: 'Image',
+      icon: <FaImage />,
+      component: ImageBlock,
+      panelControls: ImageControls,
+      defaultProps: {
+        src: '',
+        alt: ''
+      }
+    },
+    {
+      id: 'section',
+      name: 'Section',
+      icon: <FaSquare />,
+      component: SectionBlock,
+      panelControls: SectionControls,
+      defaultProps: {
+        background: '#ffffff',
+        padding: '20px',
+        children: []
+      }
+    }
+  ],
+  hooks: {
+    [HOOKS.BEFORE_SAVE]: [(content: any) => {
+      // Sanitize content before saving
+      return {
+        ...content,
+        elements: content.elements.map((el: any) => ({
+          ...el,
+          props: sanitizeProps(el.props)
+        }))
+      };
+    }]
+  }
+};
+
+function sanitizeProps(props: any) {
+  // Implement proper sanitization based on your needs
+  return props;
+}
+```
+
+
 ## 7. Page Builder Page (app/(builder)/page/[id]/page.tsx)
 ## 8. CSS Styles
 ## 9. Environment Variables (.env)
